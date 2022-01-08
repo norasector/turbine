@@ -1,0 +1,39 @@
+# Config used by NoraSector for SERS/KCERS
+
+sample_rate: 8000000
+center_freq: 854800000
+output_rate: 24000
+device: hackrf
+influxdb:
+  host: "http://localhost:8086"
+  organization: "norasector"
+  bucket: "receiver"
+viz_server:
+  port: 3333
+  update_interval_ms: 200ms
+output_destinations:
+  - host: 127.0.0.1
+    port: 8644
+systems:
+  - id: 604
+    name: KCERS
+    control_freqs:
+      - 851412500
+      - 853175000
+      - 853675000
+      - 854362500
+    system_type: smartnet
+    symbol_rate: 3600
+    voice_bandwidth: 9000
+    squelch_level: -24
+  - id: 2527
+    name: SERS
+    control_freqs:
+      - 852937500
+      - 853337500
+      - 857012500
+      - 857162500
+    system_type: smartnet
+    symbol_rate: 3600
+    voice_bandwidth: 9000
+    squelch_level: -28
