@@ -159,11 +159,6 @@ func (s *SmartnetAssembler) crcCheck() (bool, SmartnetPacket) {
 		}
 		packet.Address ^= SmartnetIDInvXOr
 
-		// The TGID is & 0xFFF0
-		// The status is & 0x000F
-		// This is actually probably not the right spot for this.
-		packet.Address &= 0xFFF0
-
 		packet.Group = ^s.eccFrame[16] & 0x1
 		packet.Command = 0
 		for j := 17; j < 27; j++ {

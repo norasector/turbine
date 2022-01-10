@@ -160,7 +160,7 @@ func (s *SmartnetProcessor) processSmartnetPacket(metrics map[string]interface{}
 
 				case osw1.isChannel && osw1.Group > 0 && osw1.Address != 0 && osw2.Address != 0:
 					srcID := osw2.Address
-					destTGID := osw1.Address
+					destTGID := osw1.Address & 0xfff0
 					targetFreq := osw1.frequency
 
 					s.logger.Debug().
@@ -282,7 +282,7 @@ func (s *SmartnetProcessor) processSmartnetPacket(metrics map[string]interface{}
 				osw1 := s.popSmartnetPacket()
 				if osw1.isChannel && osw1.Group > 0 && osw1.Address > 0 {
 					srcID := osw2.Address
-					destTGID := osw1.Address
+					destTGID := osw1.Address & 0xfff0
 					targetFreq := osw1.frequency
 
 					s.logger.Debug().
@@ -304,7 +304,7 @@ func (s *SmartnetProcessor) processSmartnetPacket(metrics map[string]interface{}
 					s.pushLeftSmartnetPacket(osw1)
 				}
 			case osw2.isChannel && osw2.Group > 0:
-				destTGID := osw2.Address
+				destTGID := osw2.Address & 0xfff0
 				targetFreq := osw2.frequency
 				// TODO update_vocie_freq
 

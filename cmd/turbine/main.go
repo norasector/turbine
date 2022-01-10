@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go"
+	"github.com/influxdata/influxdb-client-go/api"
 	"github.com/norasector/turbine/pkg/dsp/viz"
 	"github.com/norasector/turbine/pkg/turbine"
 	"github.com/norasector/turbine/pkg/turbine/config"
@@ -21,6 +22,7 @@ import (
 	hackrfDevice "github.com/norasector/turbine/pkg/turbine/device/hackrf"
 	"github.com/norasector/turbine/pkg/turbine/device/rtlsdr"
 	"github.com/norasector/turbine/pkg/turbine/output"
+	"github.com/norasector/turbine/pkg/util"
 	"github.com/samuel/go-hackrf/hackrf"
 	"golang.org/x/sync/errgroup"
 )
@@ -95,10 +97,13 @@ func main() {
 		}
 	}
 
+	var influxWriteAPI api.WriteAPI = &util.MockWriteAPI{}
+	if opts.InfluxDB.Host != "" {
+		influxWriteAPI = influxdb2.NewClient(opts.InfluxDB.Host, "").WriteAPI(opts.InfluxDB.Organization, opts.InfluxDB.Bucket)
+	}
+
 	vizServer := viz.NewServer(opts.VizServer.Port, opts.VizServer.UpdateInterval)
 	// vizServer.Enable(false)
-
-	influxWriteAPI := influxdb2.NewClient(opts.InfluxDB.Host, "").WriteAPI(opts.InfluxDB.Organization, opts.InfluxDB.Bucket)
 
 	turbine, err := turbine.NewTurbine(device,
 		turbine.Options{

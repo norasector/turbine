@@ -49,7 +49,9 @@ type TurbineOption func(t *Turbine) error
 
 func WithInfluxDB(influxClient api.WriteAPI) TurbineOption {
 	return func(t *Turbine) error {
-		t.writeAPI = influxClient
+		if influxClient != nil {
+			t.writeAPI = influxClient
+		}
 		return nil
 	}
 }
