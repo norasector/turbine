@@ -73,17 +73,20 @@ func (t IdenTable) ChannelToFrequency(channel uint16) int {
 
 // ParseIdenUp extracts frequency band definition from an IDEN_UP TSBK.
 // Opcode 0x3D: Identifier Update
-// Data layout:
-//   Byte 0: Identifier (4 bits) | reserved
-//   Bytes 1-4: BW(9) | Offset(8) | Spacing(10) | BaseFreq(32 in two parts)
+// Data layout (64 bits = Data[0:8]):
+//   Bits 63-60: Identifier (4)
+//   Bits 59-51: BW (9)
+//   Bits 50-42: TX Offset (9)
+//   Bits 41-32: Channel Spacing (10)
+//   Bits 31-0:  Base Frequency (32)
 func ParseIdenUp(tsbk TSBK) IdenEntry {
 	data := tsbk.Data[:]
 
 	iden := (data[0] >> 4) & 0x0F
 	bw := (uint16(data[0]&0x0F) << 5) | uint16(data[1]>>3)
-	offset := uint16(data[1]&0x07)<<5 | uint16(data[2]>>3)
-	spacing := uint32(data[2]&0x07)<<7 | uint32(data[3]>>1)
-	baseFreq := uint64(data[3]&0x01)<<31 | uint64(data[4])<<23 | uint64(data[5])<<15 | uint64(data[6])<<7 | uint64(data[7]>>1)
+	offset := uint16(data[1]&0x07)<<6 | uint16(data[2]>>2)
+	spacing := uint32(data[2]&0x03)<<8 | uint32(data[3])
+	baseFreq := uint32(data[4])<<24 | uint32(data[5])<<16 | uint32(data[6])<<8 | uint32(data[7])
 
 	return IdenEntry{
 		Identifier: iden,
@@ -96,14 +99,15 @@ func ParseIdenUp(tsbk TSBK) IdenEntry {
 
 // ParseIdenUpVUHP extracts frequency band definition from an IDEN_UP_VU TSBK.
 // Opcode 0x34: Identifier Update for VHF/UHF bands.
+// Same bit layout as IDEN_UP.
 func ParseIdenUpVUHP(tsbk TSBK) IdenEntry {
 	data := tsbk.Data[:]
 
 	iden := (data[0] >> 4) & 0x0F
 	bw := (uint16(data[0]&0x0F) << 5) | uint16(data[1]>>3)
-	offset := uint16(data[1]&0x07)<<5 | uint16(data[2]>>3)
-	spacing := uint32(data[2]&0x07)<<7 | uint32(data[3]>>1)
-	baseFreq := uint64(data[3]&0x01)<<31 | uint64(data[4])<<23 | uint64(data[5])<<15 | uint64(data[6])<<7 | uint64(data[7]>>1)
+	offset := uint16(data[1]&0x07)<<6 | uint16(data[2]>>2)
+	spacing := uint32(data[2]&0x03)<<8 | uint32(data[3])
+	baseFreq := uint32(data[4])<<24 | uint32(data[5])<<16 | uint32(data[6])<<8 | uint32(data[7])
 
 	return IdenEntry{
 		Identifier: iden,
@@ -129,18 +133,18 @@ type GrpVChGrant struct {
 }
 
 // ParseGrpVChGrant extracts fields from a GRP_V_CH_GRANT TSBK (opcode 0x00).
-// Data layout:
-//   Bytes 0-1: Options + reserved
-//   Bytes 2-3: Channel (16 bits)
-//   Bytes 4-5: TGID (16 bits)
-//   Bytes 6-7: Source ID (low 16 of 24 bits, high 8 in options)
+// Data layout (Data[0:8] = TSBK bytes 2-9):
+//   Data[0]:   Service Options
+//   Data[1:2]: Channel (16 bits: 4-bit identifier + 12-bit channel number)
+//   Data[3:4]: Group Address / TGID (16 bits)
+//   Data[5:7]: Source Address / SrcID (24 bits)
 func ParseGrpVChGrant(tsbk TSBK) GrpVChGrant {
 	data := tsbk.Data[:]
 
 	return GrpVChGrant{
-		Channel: uint16(data[2])<<8 | uint16(data[3]),
-		TGID:    uint16(data[4])<<8 | uint16(data[5]),
-		SrcID:   uint32(data[1])<<16 | uint32(data[6])<<8 | uint32(data[7]),
+		Channel: uint16(data[1])<<8 | uint16(data[2]),
+		TGID:    uint16(data[3])<<8 | uint16(data[4]),
+		SrcID:   uint32(data[5])<<16 | uint32(data[6])<<8 | uint32(data[7]),
 	}
 }
 

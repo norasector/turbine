@@ -5,14 +5,10 @@ package p25
 // It contains:
 //   - NAC: 12-bit Network Access Code (like a system ID)
 //   - DUID: 4-bit Data Unit ID (identifies frame type)
-//   - Parity: 48 bits of Golay coding
+//   - Parity: BCH(63,16,23) + 1 overall parity bit
 //
-// The 64 bits are encoded as two Golay(24,12) codewords:
-//   - First 24 bits: Golay codeword containing NAC[11:0] (12 data bits)
-//   - Next 24 bits:  Golay codeword containing DUID[3:0] + reserved/parity (12 data bits)
-//   - Remaining 16 bits: additional parity/BCH bits
-//
-// Simplified approach: extract NAC and DUID from the 64-bit NID using Golay decoding.
+// Structure: [BCH codeword (63 bits) | overall parity (1 bit)]
+// BCH data: NAC(12) << 4 | DUID(4) = 16 info bits at positions 62-47.
 
 // NID represents a decoded P25 Network ID.
 type NID struct {
@@ -34,42 +30,26 @@ func DecodeNID(dibits []byte) NID {
 		nidBits = (nidBits << 2) | uint64(dibits[i]&0x03)
 	}
 
-	// Extract the two 24-bit Golay codewords
-	// The NID is structured as: [NAC(12) | DUID(4) | parity(48)]
-	// Encoded as Golay(24,12) blocks
-
-	// First Golay block: bits 63..40 (24 bits)
-	cw1 := uint32((nidBits >> 40) & 0xFFFFFF)
-	data1, _, ok1 := GolayDecode24(cw1)
-
-	// Second Golay block: bits 39..16 (24 bits)
-	cw2 := uint32((nidBits >> 16) & 0xFFFFFF)
-	data2, _, ok2 := GolayDecode24(cw2)
-
-	if !ok1 || !ok2 {
-		// Try alternative NID structure: direct extraction with error tolerance
-		return decodeNIDDirect(nidBits)
+	// Decode using BCH(63,16,23)
+	nac, duid, _, valid := BCHDecodeNID(nidBits)
+	if valid {
+		return NID{NAC: nac, DUID: duid, Valid: true}
 	}
 
-	// data1 contains NAC (12 bits)
-	nac := uint16(data1 & 0xFFF)
-	// data2 contains DUID in the upper 4 bits (of 12 decoded bits)
-	duid := DUID((data2 >> 8) & 0x0F)
-
-	return NID{
-		NAC:   nac,
-		DUID:  duid,
-		Valid: true,
-	}
+	// Fallback: direct extraction with DUID sanity check
+	return decodeNIDDirect(nidBits)
 }
 
-// decodeNIDDirect attempts NID extraction without full Golay decode.
+// decodeNIDDirect attempts NID extraction without full BCH decode.
 // Falls back to raw bit extraction which may have errors.
 func decodeNIDDirect(nidBits uint64) NID {
-	// NAC is in bits [63:52] (top 12 bits)
-	nac := uint16((nidBits >> 52) & 0xFFF)
-	// DUID is in bits [51:48]
-	duid := DUID((nidBits >> 48) & 0x0F)
+	// The 64-bit NID: [BCH(63) | parity(1)]
+	// BCH info bits at positions 62-47 of the 63-bit codeword
+	// = positions 63-48 of the 64-bit NID (shifted left by 1 for parity)
+	cw := nidBits >> 1
+	infoBits := uint16(cw >> 47)
+	nac := (infoBits >> 4) & 0xFFF
+	duid := DUID(infoBits & 0x0F)
 
 	// Basic sanity check on DUID
 	switch duid {

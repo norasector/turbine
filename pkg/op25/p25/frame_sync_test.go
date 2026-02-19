@@ -76,19 +76,13 @@ func TestCorrelateBuffer(t *testing.T) {
 func TestNIDDecode(t *testing.T) {
 	// Create a synthetic NID with known NAC and DUID
 	// NAC = 0x293, DUID = 0x7 (TSDU)
-	// We encode using Golay to create valid NID
+	// Encode using BCH(63,16,23) to create valid NID
 
-	nac := uint32(0x293)
-	duid := uint32(0x7)
+	nac := uint16(0x293)
+	duid := DUIDTSDU
 
-	// First Golay block: NAC (12 bits)
-	cw1 := GolayEncode24(nac)
-	// Second Golay block: DUID in upper 4 bits of 12-bit data
-	cw2 := GolayEncode24(duid << 8)
-
-	// Pack into 64 bits: cw1(24) | cw2(24) | padding(16)
-	var nidBits uint64
-	nidBits = uint64(cw1)<<40 | uint64(cw2)<<16
+	// BCH-encode the NID
+	nidBits := BCHEncodeNID(nac, duid)
 
 	// Convert to dibits
 	dibits := make([]byte, NIDLengthDibits)
@@ -101,10 +95,10 @@ func TestNIDDecode(t *testing.T) {
 	if !nid.Valid {
 		t.Fatal("NID decode failed")
 	}
-	if nid.NAC != uint16(nac) {
+	if nid.NAC != nac {
 		t.Errorf("NAC: got 0x%03X, expected 0x%03X", nid.NAC, nac)
 	}
-	if nid.DUID != DUIDTSDU {
-		t.Errorf("DUID: got 0x%X, expected 0x%X", nid.DUID, DUIDTSDU)
+	if nid.DUID != duid {
+		t.Errorf("DUID: got 0x%X, expected 0x%X", nid.DUID, duid)
 	}
 }
