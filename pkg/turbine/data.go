@@ -5,6 +5,7 @@ import (
 
 	"github.com/norasector/turbine/pkg/op25"
 	"github.com/norasector/turbine/pkg/op25/frame"
+	framep25 "github.com/norasector/turbine/pkg/op25/frame/p25"
 	"github.com/norasector/turbine/pkg/op25/frame/smartnet"
 	"golang.org/x/sync/errgroup"
 )
@@ -19,7 +20,8 @@ func (t *Turbine) processDataPackets() error {
 		switch sys.SystemType {
 		case op25.SystemTypeSmartnet:
 			proc = smartnet.NewProcessor(sys.ID, sys.dataPacketChan, t.updateChan, t.writeAPI, t.logger)
-
+		case op25.SystemTypeP25:
+			proc = framep25.NewProcessor(sys.ID, sys.dataPacketChan, t.updateChan, t.writeAPI, t.logger)
 		default:
 			return fmt.Errorf("unrecognized system: %s", sys.SystemType)
 		}

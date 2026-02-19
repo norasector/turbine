@@ -6,6 +6,7 @@ type SystemType string
 
 const (
 	SystemTypeSmartnet SystemType = "smartnet"
+	SystemTypeP25      SystemType = "p25"
 )
 
 type OSWPacket struct {

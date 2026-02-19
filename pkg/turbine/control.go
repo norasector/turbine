@@ -15,8 +15,10 @@ import (
 	"github.com/norasector/turbine/pkg/dsp/processor"
 	"github.com/norasector/turbine/pkg/op25"
 	"github.com/norasector/turbine/pkg/op25/frame"
+	framep25 "github.com/norasector/turbine/pkg/op25/frame/p25"
 	"github.com/norasector/turbine/pkg/op25/frame/smartnet"
 	"github.com/norasector/turbine/pkg/op25/modem/fsk4"
+	"github.com/norasector/turbine/pkg/op25/p25"
 	"github.com/norasector/turbine/pkg/op25/slicer"
 	"github.com/norasector/turbine/pkg/util"
 	"github.com/racerxdl/segdsp/dsp"
@@ -52,6 +54,8 @@ func (freq *ControlFrequency) init(t *Turbine, sys *internalSystem) {
 	switch freq.SystemType {
 	case op25.SystemTypeSmartnet:
 		freq.initSmartnet(t, sys)
+	case op25.SystemTypeP25:
+		freq.initP25(t, sys)
 	default:
 		panic(fmt.Errorf("unknown system type %s", freq.SystemType))
 	}
@@ -272,4 +276,161 @@ func (freq *ControlFrequency) initSmartnet(t *Turbine, sys *internalSystem) {
 		slicer.NewBinarySlicer(true)))
 
 	freq.assembler = smartnet.NewSmartnetAssembler(t.ctx, freq.SystemID, sys.dataPacketChan, t.logger)
+}
+
+func (freq *ControlFrequency) initP25(t *Turbine, sys *internalSystem) {
+	const p25IFRate = 24000 // target rate: 4800 sym/s × 5 sps
+
+	freq.proc = processor.NewProcessor(fmt.Sprintf("%d-control-%d", sys.ID, freq.Frequency), "Radio Input", t.vizServer)
+
+	var dec1, dec2 int
+
+	switch t.opts.SampleRate {
+	case 10e6:
+		dec1 = 25
+		dec2 = 16
+	case 8e6:
+		dec1 = 20
+		dec2 = 16
+	default:
+		dec1 = 10
+		if t.opts.SampleRate > 1e6 {
+			dec1 *= t.opts.SampleRate / 1e6
+		}
+		dec2 = 4
+	}
+
+	if1 := float64(t.opts.SampleRate) / float64(dec1)
+	if2 := float64(if1) / float64(dec2)
+
+	shiftFreq := freq.Frequency - t.opts.CenterFreq
+
+	bfoFreq := float64(shiftFreq) / if1
+	bfoFreq -= math.Floor(bfoFreq)
+	if bfoFreq < -0.5 {
+		bfoFreq += 1.0
+	}
+	if bfoFreq > 0.5 {
+		bfoFreq -= 1.0
+	}
+
+	t.logger.Info().
+		Int("system_id", freq.SystemID).
+		Str("frequency", op25.MHzToString(freq.Frequency)).
+		Str("channel_type", "control").
+		Str("system_type", "p25").
+		Int("decimation_1", dec1).
+		Int("decimation_2", dec2).
+		Int("intermediate_freq_1", int(if1)).
+		Int("intermediate_freq_2", int(if2)).
+		Int("intermediate_rate", p25IFRate).
+		Str("shift_freq", op25.MHzToString(shiftFreq)).
+		Str("bfo_freq", op25.MHzToString(int(if1*bfoFreq))).
+		Msg("initializing P25 control channel")
+
+	bpfCoeffs := fir.MakeComplexBandPass(1.0,
+		float64(t.opts.SampleRate),
+		float64(shiftFreq)-if1/2.0,
+		float64(shiftFreq)+if1/2.0,
+		if1/2,
+		fir.Hamming,
+	)
+
+	freq.proc.AddBlock(processor.NewDSPWorkerCC(
+		"bandpass_decimator",
+		"Bandpass Decimator",
+		t.opts.SampleRate,
+		int(if1),
+		dsp.MakeDecimationCTFirFilter(dec1, bpfCoeffs),
+	))
+
+	freq.proc.AddBlock(processor.NewDSPWorkerCC(
+		"bfo_mixer",
+		"BFO Mixer",
+		int(if1),
+		int(if1),
+		mixer.NewWaveformMixer(int(if1), int(if1*bfoFreq)),
+	))
+
+	fa := float64(6250)
+	fb := if2 / 2
+
+	lpfCoeffs := fir.MakeLowPass(1.0, if1, (fb+fa)/2, fb-fa, fir.Hamming)
+	freq.proc.AddBlock(processor.NewDSPWorkerCC(
+		"lowpass_decimator",
+		"Lowpass Decimator",
+		int(if1),
+		int(if2),
+		dsp.MakeDecimationFirFilter(dec2, lpfCoeffs),
+	))
+
+	freq.proc.AddBlock(processor.NewDSPWorkerCC(
+		"resampler",
+		"Rational Resampler",
+		int(if2),
+		p25IFRate,
+		dsp.MakeRationalResampler(p25IFRate/1000, int(if2)/1000),
+	))
+
+	fa = 6250
+	fb = fa + 625
+
+	cutoffLpfCoeffs := fir.MakeLowPass(1.0,
+		float64(p25IFRate),
+		(fb+fa)/2,
+		fb-fa,
+		fir.Hann)
+
+	freq.proc.AddBlock(processor.NewDSPWorkerCC(
+		"cutoff",
+		"Cutoff Filter",
+		p25IFRate,
+		p25IFRate,
+		dsp.MakeFirFilter(cutoffLpfCoeffs),
+	))
+
+	freq.proc.AddBlock(processor.NewDSPWorkerCF(
+		"quad_demod",
+		"FM Demodulation",
+		p25IFRate,
+		p25IFRate,
+		quad.MakeQuadDemod(
+			float32(p25IFRate)/(2*math.Pi*float32(p25.P25SymbolRate)),
+		)))
+
+	freq.proc.AddBlock(processor.NewDSPWorkerFF(
+		"baseband_amp",
+		"Baseband Amp (RMS AGC)",
+		p25IFRate,
+		p25IFRate,
+		rmsagc.NewRMSAGC(0.01, 0.61)))
+
+	sps := p25IFRate / p25.P25SymbolRate
+	ntaps := (7 * sps) | 1
+	symbolFilterTaps := dsp.MakeRRC(1.0, float64(p25IFRate), float64(p25.P25SymbolRate), 0.35, ntaps)
+
+	freq.proc.AddBlock(processor.NewDSPWorkerFF(
+		"symbol_filter",
+		"Symbol Filter (RRC)",
+		p25IFRate,
+		p25IFRate,
+		dsp.MakeFloatFirFilter(symbolFilterTaps)))
+
+	freq.proc.AddBlock(processor.NewDSPWorkerFF(
+		"fsk_demodulator",
+		"FSK Demodulator (4FSK)",
+		p25IFRate,
+		p25.P25SymbolRate,
+		fsk4.NewFSK4Demodulator(p25IFRate, p25.P25SymbolRate, false),
+		processor.WithVizLength(26),
+	))
+
+	freq.proc.AddBlock(processor.NewDSPWorkerFB(
+		"dibit_slicer",
+		"Dibit Slicer",
+		p25.P25SymbolRate,
+		p25.P25SymbolRate,
+		slicer.NewDibitSlicer()))
+
+	freq.assembler = framep25.NewP25Assembler(t.ctx, freq.SystemID, sys.dataPacketChan, t.logger)
 }
